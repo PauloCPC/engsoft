@@ -1,0 +1,565 @@
+from datetime import date, datetime
+import json
+import os
+
+# ==============================================================================
+# 1. CONSTANTES E ARQUIVOS DE DADOS
+# ==============================================================================
+ARQUIVO_DADOS = 'clinica_dados.json'
+PRIORIDADE_IDADE = 60 # Pacientes com 60 anos ou mais
+
+# Estruturas de Dados em Memória (serão carregadas/salvas em JSON)
+pacientes = {} # {cpf: Paciente_objeto}
+medicos = {}   # {crm: Medico_objeto}
+consultas = [] # Lista de objetos Consulta
+
+# ==============================================================================
+# 2. FUNÇÕES DE UTILIDADE E PERSISTÊNCIA
+# ==============================================================================
+
+def calcular_idade(data_nasc_str):
+    """Calcula a idade atual com base na data de nascimento (DD/MM/AAAA)."""
+    try:
+        data_nasc = datetime.strptime(data_nasc_str, "%d/%m/%Y").date()
+    except ValueError:
+        return None
+
+    today = date.today()
+    if data_nasc > today:
+        return -1
+
+    idade = today.year - data_nasc.year - ((today.month, today.day) < (data_nasc.month, data_nasc.day))
+    return idade
+
+# --- NOVA FUNÇÃO AUXILIAR PARA SELEÇÃO DE MÉDICO ---
+def selecionar_medico():
+    """Exibe a lista de médicos e permite a seleção por número."""
+    if not medicos:
+        print("❌ Nenhum médico cadastrado.")
+        return None
+
+    medicos_list = list(medicos.values())
+    print("\n--- Lista de Médicos ---")
+    for i, m in enumerate(medicos_list, 1):
+        print(f"{i}. Dr(a). {m.nome} ({m.especialidade} - CRM: {m.crm})")
+
+    while True:
+        try:
+            escolha = input("Selecione o NÚMERO do médico (ou 'v' para voltar): ").strip().lower()
+            if escolha == 'v':
+                return None
+
+            index = int(escolha) - 1
+            if 0 <= index < len(medicos_list):
+                return medicos_list[index]
+            else:
+                print("⚠️ Número inválido. Tente novamente.")
+        except ValueError:
+            print("⚠️ Entrada inválida. Digite o número.")
+
+# -----------------------------------------------------------------------------
+
+def carregar_dados():
+    """Carrega os dados de pacientes, médicos e consultas do arquivo JSON."""
+    global pacientes, medicos, consultas
+    if os.path.exists(ARQUIVO_DADOS):
+        # A lógica de carregamento de dados é a mesma...
+        # ... (Mantendo a função original)
+        with open(ARQUIVO_DADOS, 'r', encoding='utf-8') as f:
+            dados = json.load(f)
+
+            # Recria objetos Paciente e Medico a partir dos dados do JSON
+            pacientes = {
+                cpf: Paciente(**p) for cpf, p in dados.get('pacientes', {}).items()
+            }
+            medicos = {
+                crm: Medico(agenda=m.pop('agenda'), **m) for crm, m in dados.get('medicos', {}).items()
+            }
+            # Recria objetos Consulta
+            consultas = [
+                Consulta(**c) for c in dados.get('consultas', [])
+            ]
+        print(f"✅ Dados carregados com sucesso de {ARQUIVO_DADOS}.")
+    else:
+        print(f"⚠️ Arquivo de dados {ARQUIVO_DADOS} não encontrado. Iniciando com dados vazios.")
+
+def salvar_dados():
+    """Salva os dados de pacientes, médicos e consultas no arquivo JSON."""
+    # A lógica de salvamento de dados é a mesma...
+    dados_para_salvar = {
+        'pacientes': {cpf: p.__dict__ for cpf, p in pacientes.items()},
+        'medicos': {crm: m.__dict__ for crm, m in medicos.items()},
+        'consultas': [c.__dict__ for c in consultas]
+    }
+    try:
+        with open(ARQUIVO_DADOS, 'w', encoding='utf-8') as f:
+            json.dump(dados_para_salvar, f, indent=4, ensure_ascii=False)
+        # Não exibe a mensagem de sucesso aqui para evitar poluição do console a cada ação
+    except Exception as e:
+        print(f"❌ Erro ao salvar dados: {e}")
+
+# ==============================================================================
+# 3. CLASSES DO SISTEMA (Sem alteração)
+# ==============================================================================
+
+class Paciente:
+    """Representa um paciente com dados pessoais, prioridade e status de pagamento."""
+    def __init__(self, nome, data_nascimento, cpf, telefone, status_pagamento="Em Dia", **kwargs):
+        self.nome = nome
+        self.data_nascimento = data_nascimento
+        self.cpf = cpf
+        self.telefone = telefone
+        self.status_pagamento = status_pagamento
+        self.idade = calcular_idade(data_nascimento)
+        # Ensure prioritario is set only if idade is not None
+        self.prioritario = self.idade >= PRIORIDADE_IDADE if self.idade is not None else False
+
+    def __str__(self):
+        prioridade_msg = "PRIORITÁRIO" if self.prioritario else "NORMAL"
+        return f"{self.nome} (Idade: {self.idade} | CPF: {self.cpf}) - Status: {self.status_pagamento} ({prioridade_msg})"
+
+class Medico:
+    """Representa um médico com dados, especialidade e agenda de disponibilidade."""
+    def __init__(self, nome, especialidade, crm, agenda=None, **kwargs):
+        self.nome = nome
+        self.especialidade = especialidade
+        self.crm = crm
+        # Agenda é um dicionário: {'DD/MM/AAAA': ['HH:MM']}
+        self.agenda = agenda if agenda is not None else {}
+
+    def __str__(self):
+        return f"Dr(a). {self.nome} ({self.especialidade} - {self.crm})"
+
+    def adicionar_disponibilidade(self, data, horarios):
+        """Adiciona horários na agenda. Horários deve ser uma lista de strings HH:MM."""
+        # Implementação resumida
+        if data not in self.agenda:
+            self.agenda[data] = []
+
+        horarios_atuais = set(self.agenda[data])
+        horarios_atuais.update(horarios)
+        self.agenda[data] = sorted(list(horarios_atuais))
+        return True
+
+    def remover_disponibilidade(self, data, horario):
+        """Remove um horário específico da disponibilidade."""
+        # Implementação resumida
+        if data in self.agenda and horario in self.agenda[data]:
+            self.agenda[data].remove(horario)
+            if not self.agenda[data]:
+                del self.agenda[data]
+            return True
+        return False
+
+class Consulta:
+    """Representa uma consulta agendada."""
+    def __init__(self, cpf_paciente, crm_medico, data, horario, status="AGENDADA", receita="", **kwargs):
+        self.cpf_paciente = cpf_paciente
+        self.crm_medico = crm_medico
+        self.data = data
+        self.horario = horario
+        self.status = status # AGENDADA, CONFIRMADA, CANCELADA, REALIZADA
+        self.receita = receita
+
+    def __str__(self):
+        # Utiliza os dicionários globais para buscar informações
+        paciente_nome = pacientes.get(self.cpf_paciente).nome if self.cpf_paciente in pacientes else "Desconhecido"
+        medico_nome = medicos.get(self.crm_medico).nome if self.crm_medico in medicos else "Desconhecido"
+        return f"Paciente: {paciente_nome} | Médico: Dr(a). {medico_nome} | Data: {self.data} às {self.horario} | Status: {self.status}"
+
+# ==============================================================================
+# 4. FUNÇÕES DE CADASTRO (Atores: Secretária / Médico) (Sem alteração)
+# ==============================================================================
+
+# ... (Mantendo as funções cadastrar_paciente e cadastrar_medico originais) ...
+def cadastrar_paciente():
+    """Secretária: Cadastra um novo paciente, verifica duplicidade de CPF."""
+    print("\n--- Cadastro de Paciente ---")
+    nome = input("Nome completo: ").strip()
+
+    while True:
+        data_nascimento_input = input("Data de nascimento (DD/MM/AAAA): ").strip()
+        idade = calcular_idade(data_nascimento_input)
+
+        if idade is None:
+            print("❌ Erro: Formato de data inválido. Use DD/MM/AAAA.")
+        elif idade < 0 or idade > 150:
+            print("❌ Erro: Idade calculada irrealista.")
+        else:
+            break
+
+    while True:
+        cpf = input("CPF (apenas números): ").strip()
+        if not cpf:
+            print("❌ Erro: CPF não pode ser vazio.")
+        elif cpf in pacientes:
+            print(f"❌ Erro: CPF '{cpf}' já cadastrado.")
+        else:
+            break
+
+    telefone = input("Telefone: ").strip()
+
+    # Status de Pagamento
+    status_pagamento = "Em Dia" if input("Status de Pagamento (1- Em Dia, 2- Pendente): ") == '1' else "Pendente"
+
+    novo_paciente = Paciente(nome, data_nascimento_input, cpf, telefone, status_pagamento)
+    pacientes[cpf] = novo_paciente
+
+    print(f"\n✅ Paciente {novo_paciente.nome} cadastrado. Prioritário: {'Sim' if novo_paciente.prioritario else 'Não'}")
+    salvar_dados()
+    return novo_paciente
+
+def cadastrar_medico():
+    """Médico: Cadastra um novo médico, verifica duplicidade de CRM."""
+    print("\n--- Cadastro de Médico ---")
+    nome = input("Nome completo do(a) médico(a): ").strip()
+    especialidade = input("Especialidade: ").strip()
+
+    while True:
+        crm = input("CRM: ").strip().upper()
+        if not crm:
+            print("❌ Erro: CRM não pode ser vazio.")
+        elif crm in medicos:
+            print(f"❌ Erro: CRM '{crm}' já cadastrado.")
+        else:
+            break
+
+    novo_medico = Medico(nome, especialidade, crm)
+    medicos[crm] = novo_medico
+
+    print(f"\n✅ Médico(a) Dr(a). {novo_medico.nome} ({novo_medico.especialidade}) cadastrado(a).")
+    salvar_dados()
+
+# ==============================================================================
+# 5. FUNÇÕES DE GESTÃO DE CONSULTAS (Ator: Secretária)
+# ==============================================================================
+
+def agendar_consulta():
+    """Secretária: Permite o agendamento de uma nova consulta, exibindo médicos e horários."""
+    print("\n--- Agendamento de Consulta ---")
+    if not pacientes or not medicos:
+        print("❌ ERRO: É necessário ter pacientes e médicos cadastrados.")
+        return
+
+    # 1. Seleção do Paciente
+    cpf = input("Digite o CPF do paciente (ou deixe vazio para cadastrar): ").strip()
+    paciente_obj = pacientes.get(cpf)
+
+    if not paciente_obj:
+        print("Paciente não encontrado.")
+        if input("Deseja cadastrar agora? (s/n): ").lower() == 's':
+            paciente_obj = cadastrar_paciente()
+            if not paciente_obj: return
+        else:
+            return
+
+    # 2. Seleção do Médico (NOVO: Listando e Selecionando)
+    medico_obj = selecionar_medico()
+    if not medico_obj:
+        return
+    crm = medico_obj.crm # Obtém o CRM do objeto selecionado
+
+    # 3. Exibir Horários Disponíveis e Seleção
+    print(f"\n--- Horários Disponíveis de Dr(a). {medico_obj.nome} ({medico_obj.especialidade}) ---")
+    if not medico_obj.agenda:
+        print("❌ ERRO: Este médico não tem horários de disponibilidade cadastrados.")
+        return
+
+    disponibilidade = {}
+
+    for data, horarios_totais in medico_obj.agenda.items():
+        try:
+            # Pula datas passadas
+            data_dt = datetime.strptime(data, "%d/%m/%Y").date()
+            if data_dt < date.today():
+                 continue
+        except ValueError:
+            continue # Pula datas com formato inválido no registro
+
+        # Filtra horários que já estão AGENDADOS/CONFIRMADOS
+        horarios_ocupados = {
+            c.horario for c in consultas
+            if c.crm_medico == crm and c.data == data and c.status in ["AGENDADA", "CONFIRMADA"]
+        }
+        horarios_disponiveis = sorted([h for h in horarios_totais if h not in horarios_ocupados])
+
+        if horarios_disponiveis:
+            disponibilidade[data] = horarios_disponiveis
+
+    if not disponibilidade:
+        print(">> Não há horários disponíveis ou futuros para este médico.")
+        return
+
+    # Exibe a disponibilidade organizada
+    print("\n🗓️ Datas e Horários Disponíveis (futuros):")
+    datas_ordenadas = sorted(disponibilidade.keys(), key=lambda x: datetime.strptime(x, "%d/%m/%Y"))
+
+    for data in datas_ordenadas:
+        print(f"   - {data}: {', '.join(disponibilidade[data])}")
+
+    # 4. Seleção da Data e Horário
+    while True:
+        data_selecionada = input("\nEscolha a data da consulta (DD/MM/AAAA): ").strip()
+        if data_selecionada in disponibilidade:
+            break
+        print("⚠️ Data inválida ou sem horários disponíveis. Tente novamente.")
+
+    while True:
+        horario_selecionado = input("Escolha o horário (HH:MM): ").strip()
+        if horario_selecionado in disponibilidade[data_selecionada]:
+            break
+        print("⚠️ Horário inválido para a data selecionada. Tente novamente.")
+
+    # 5. Criação da Consulta
+    nova_consulta = Consulta(paciente_obj.cpf, crm, data_selecionada, horario_selecionado, status="AGENDADA")
+    consultas.append(nova_consulta)
+
+    print(f"\n✅ Consulta AGENDADA com sucesso:")
+    print(f"   {nova_consulta}")
+    salvar_dados()
+
+def confirmar_consulta():
+    """Secretária: Altera o status de uma consulta de AGENDADA para CONFIRMADA."""
+    # ... (Mantendo a função original)
+    print("\n--- Confirmação de Consulta ---")
+
+    consulta_index = input("Digite o NÚMERO da consulta AGENDADA a ser confirmada: ").strip()
+    try:
+        index = int(consulta_index) - 1
+        if 0 <= index < len(consultas):
+            consulta = consultas[index]
+            if consulta.status == "AGENDADA":
+                consulta.status = "CONFIRMADA"
+                print(f"\n✅ Consulta de {pacientes[consulta.cpf_paciente].nome} CONFIRMADA para {consulta.data} às {consulta.horario}.")
+                salvar_dados()
+            elif consulta.status == "CONFIRMADA":
+                print("⚠️ Aviso: Esta consulta já está CONFIRMADA.")
+            else:
+                print(f"❌ Erro: A consulta está com status '{consulta.status}' e não pode ser confirmada.")
+        else:
+            print("❌ Erro: Número de consulta inválido.")
+    except ValueError:
+        print("❌ Erro: Entrada inválida. Digite o número da consulta.")
+
+def cancelar_consulta():
+    """Secretária/Médico: Altera o status de uma consulta para CANCELADA."""
+    # ... (Mantendo a função original)
+    print("\n--- Cancelamento de Consulta ---")
+
+    consulta_index = input("Digite o NÚMERO da consulta a ser CANCELADA: ").strip()
+    try:
+        index = int(consulta_index) - 1
+        if 0 <= index < len(consultas):
+            consulta = consultas[index]
+            if consulta.status in ["AGENDADA", "CONFIRMADA"]:
+                consulta.status = "CANCELADA"
+                print(f"\n✅ Consulta de {pacientes[consulta.cpf_paciente].nome} CANCELADA. Status atualizado.")
+                salvar_dados()
+            elif consulta.status == "CANCELADA":
+                print("⚠️ Aviso: Esta consulta já estava CANCELADA.")
+            else:
+                print(f"❌ Erro: A consulta está com status '{consulta.status}' e não pode ser cancelada.")
+        else:
+            print("❌ Erro: Número de consulta inválido.")
+    except ValueError:
+        print("❌ Erro: Entrada inválida. Digite o número da consulta.")
+
+# ==============================================================================
+# 6. FUNÇÕES MÉDICAS (Ator: Médico) (Sem alteração)
+# ==============================================================================
+
+# ... (Mantendo as funções gerar_receita e print_receita originais) ...
+def gerar_receita():
+    """Médico: Permite gerar uma receita para uma consulta (e aciona a impressão)."""
+    print("\n--- Geração de Receita ---")
+
+    consulta_index = input("Digite o NÚMERO da consulta REALIZADA para a receita: ").strip()
+    try:
+        index = int(consulta_index) - 1
+        if 0 <= index < len(consultas):
+            consulta = consultas[index]
+            if consulta.status not in ["CONFIRMADA", "REALIZADA"]:
+                 print(f"❌ Erro: A consulta precisa estar CONFIRMADA/REALIZADA para gerar receita. Status atual: {consulta.status}")
+                 return
+
+            if consulta.status != "REALIZADA":
+                consulta.status = "REALIZADA"
+
+            receita_texto = input("Digite o texto da Receita: ").strip()
+            consulta.receita = receita_texto
+
+            print(f"\n✅ Receita gerada para {pacientes[consulta.cpf_paciente].nome}.")
+            print_receita(consulta.receita)
+            salvar_dados()
+        else:
+            print("❌ Erro: Número de consulta inválido.")
+    except ValueError:
+        print("❌ Erro: Entrada inválida. Digite o número da consulta.")
+    except KeyError:
+        print("❌ Erro: Dados do paciente/médico não encontrados.")
+
+
+def print_receita(receita):
+    """(<<INCLUDE>>) Simula a impressão da receita no console."""
+    print("\n" + "="*40)
+    print("            [IMPRESSÃO DA RECEITA]")
+    print("="*40)
+    print(receita)
+    print("="*40)
+    print("[Fim da Impressão]")
+
+# ==============================================================================
+# 7. FUNÇÕES DE EXIBIÇÃO E MENU
+# ==============================================================================
+
+def exibir_consultas_ativas():
+    """Exibe todas as consultas AGENDADAS e CONFIRMADAS com número de índice."""
+    # ... (Mantendo a função original)
+    print("\n--- Consultas Agendadas e Confirmadas ---")
+
+    ativas = [c for c in consultas if c.status in ["AGENDADA", "CONFIRMADA"]]
+    if not ativas:
+        print(">> Nenhuma consulta agendada ou confirmada.")
+        return
+
+    print(f"{'Nº':<4} | {'Status':<12} | {'Data':<12} | {'Horário':<8} | {'Paciente':<25} | {'Médico':<25}")
+    print("-" * 86)
+
+    for i, c in enumerate(consultas):
+        if c in ativas:
+            # FIX: Provide a valid data_nascimento for the placeholder Paciente object
+            paciente_nome = pacientes.get(c.cpf_paciente, Paciente("Nome Indisp.", "01/01/2000", "", "")).nome
+            medico_nome = medicos.get(c.crm_medico, Medico("Nome Indisp.", "", "")).nome
+
+            print(
+                f"{i+1:<4} | {c.status:<12} | {c.data:<12} | {c.horario:<8} | "
+                f"{paciente_nome:<25} | {medico_nome:<25}"
+            )
+
+# --- FUNÇÃO GERENCIAR DISPONIBILIDADE MÉDICA ATUALIZADA ---
+def gerenciar_disponibilidade_medica():
+    """Permite adicionar disponibilidade a um médico existente, exibindo-os para escolha."""
+    print("\n--- Gerenciar Disponibilidade ---")
+
+    # Usa a função auxiliar para selecionar o médico
+    medico_obj = selecionar_medico()
+
+    if not medico_obj:
+        return
+
+    print(f"\n✅ Gerenciando agenda de Dr(a). {medico_obj.nome}")
+
+    # Adicionada validação de data futura
+    while True:
+        data = input("Digite a data (DD/MM/AAAA) para adicionar horários: ").strip()
+        try:
+            data_dt = datetime.strptime(data, "%d/%m/%Y").date()
+            if data_dt < date.today():
+                print("❌ Data inválida. Por favor, insira uma data futura.")
+            else:
+                break
+        except ValueError:
+            print("❌ Formato de data inválido. Use DD/MM/AAAA.")
+
+    horarios_input = input("Digite os horários disponíveis separados por vírgula (Ex: 09:00, 10:30): ").strip()
+
+    horarios = [h.strip() for h in horarios_input.split(',') if h.strip()]
+
+    if medico_obj.adicionar_disponibilidade(data, horarios):
+        print(f"✅ Horários adicionados para {data}.")
+    else:
+        print("❌ ERRO: Falha ao adicionar horários.")
+    salvar_dados()
+
+# ... (Mantendo as funções de Menu Principal, Secretária e Médico originais) ...
+
+def menu_secretaria():
+    """Menu para as ações da Secretária."""
+    while True:
+        print("\n--- Menu Secretária ---")
+        print("1. Cadastrar Novo Paciente")
+        print("2. Cadastrar Novo Médico")
+        print("3. Agendar Consulta")
+        print("4. Confirmar Consulta")
+        print("5. Cancelar Consulta")
+        print("6. Gerenciar Agenda Médica (Disponibilidade)")
+        print("7. Exibir Consultas Ativas")
+        print("8. Voltar ao Menu Principal")
+
+        escolha = input("Opção: ").strip()
+
+        if escolha == '1': cadastrar_paciente()
+        elif escolha == '2': cadastrar_medico()
+        elif escolha == '3': agendar_consulta()
+        elif escolha == '4':
+            exibir_consultas_ativas()
+            confirmar_consulta()
+        elif escolha == '5':
+            exibir_consultas_ativas()
+            cancelar_consulta()
+        elif escolha == '6': gerenciar_disponibilidade_medica()
+        elif escolha == '7': exibir_consultas_ativas()
+        elif escolha == '8': break
+        else: print("⚠️ Opção inválida.")
+        # Salva dados apenas uma vez por ação concluída
+        if escolha in ['1', '2', '3', '4', '5', '6']:
+             salvar_dados()
+
+def menu_medico():
+    """Menu para as ações do Médico."""
+    while True:
+        print("\n--- Menu Médico ---")
+        print("1. Cancelar Consulta")
+        print("2. Gerar Receita")
+        print("3. Exibir Consultas Ativas/Confirmadas")
+        print("4. Voltar ao Menu Principal")
+
+        escolha = input("Opção: ").strip()
+
+        if escolha == '1':
+            exibir_consultas_ativas()
+            cancelar_consulta()
+        elif escolha == '2':
+            exibir_consultas_ativas()
+            gerar_receita()
+        elif escolha == '3': exibir_consultas_ativas()
+        elif escolha == '4': break
+        else: print("⚠️ Opção inválida.")
+        # Salva dados apenas uma vez por ação concluída
+        if escolha in ['1', '2']:
+             salvar_dados()
+
+def menu_principal():
+    """Menu Principal de login/escolha de perfil."""
+    print("="*40)
+    print(" Sistema de Gestão de Consultas (Clínica Vida+)")
+    print("="*40)
+
+    carregar_dados() # Carrega dados ao iniciar o sistema
+
+    while True:
+        print("\n--- Perfil de Acesso ---")
+        print("1. Acessar como Secretária")
+        print("2. Acessar como Médico")
+        print("3. Sair e Salvar")
+
+        escolha = input("Escolha a opção (1-3): ").strip()
+
+        if escolha == '1':
+            menu_secretaria()
+        elif escolha == '2':
+            menu_medico()
+        elif escolha == '3':
+            print("\n👋 Encerrando o sistema. Até logo!")
+            break
+        else:
+            print("⚠️ Opção inválida.")
+
+    salvar_dados() # Salva dados ao encerrar
+
+# ==============================================================================
+# 8. EXECUÇÃO
+# ==============================================================================
+
+if __name__ == "__main__":
+    menu_principal()
