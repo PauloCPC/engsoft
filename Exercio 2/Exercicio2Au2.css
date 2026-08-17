@@ -1,0 +1,10 @@
+/* resolução de até 1280px */
+body {
+    margin: 0;
+    padding: 0;
+}
+
+#progress {
+    position: fixed;
+    background-color: #c4c1c1;
+}
